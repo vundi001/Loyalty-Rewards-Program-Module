@@ -1,0 +1,5 @@
+bin
+build
+build-publish.sh
+download-sui-binaries.sh
+move.lock
