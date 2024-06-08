@@ -1,4 +1,3 @@
-#[allow(unused_variable)]
 module LoyaltyRewards::rewards_program {
 
     // Imports
@@ -10,7 +9,7 @@ module LoyaltyRewards::rewards_program {
     use sui::tx_context::{Self, TxContext};
     use sui::clock::{Self, Clock};
 
-    // Errors (keeping only used constants)
+    // Errors
     const ENotOwner: u64 = 2;
     const ENotValidated: u64 = 3;
     const EAlreadyRedeemed: u64 = 4;
@@ -46,42 +45,42 @@ module LoyaltyRewards::rewards_program {
     }
 
     // Module initializer
-    fun init(ctx: &mut TxContext) {
+    public entry fun init(ctx: &mut TxContext) {
         transfer::transfer(AdminCap {
             id: object::new(ctx),
         }, tx_context::sender(ctx));
     }
 
     // Accessors
-    public entry fun get_reward_points(reward: &Reward): u64 {
+    public fun get_reward_points(reward: &Reward): u64 {
         reward.points
     }
 
-    public entry fun get_reward_deadline(reward: &Reward): u64 {
+    public fun get_reward_deadline(reward: &Reward): u64 {
         reward.deadline
     }
 
-    public entry fun get_reward_expiry(reward: &Reward): u64 {
+    public fun get_reward_expiry(reward: &Reward): u64 {
         reward.expiry
     }
 
-    public entry fun is_reward_validated(reward: &Reward): bool {
+    public fun is_reward_validated(reward: &Reward): bool {
         reward.validated
     }
 
-    public entry fun is_reward_redeemed(reward: &Reward): bool {
+    public fun is_reward_redeemed(reward: &Reward): bool {
         reward.redeemed
     }
 
-    public entry fun is_reward_transferable(reward: &Reward): bool {
+    public fun is_reward_transferable(reward: &Reward): bool {
         reward.transferable
     }
 
-    public entry fun is_event_based_reward(reward: &Reward): bool {
+    public fun is_event_based_reward(reward: &Reward): bool {
         reward.event_trigger
     }
 
-    public entry fun get_reward_tier(reward: &Reward): u8 {
+    public fun get_reward_tier(reward: &Reward): u8 {
         reward.tier
     }
 
@@ -89,8 +88,9 @@ module LoyaltyRewards::rewards_program {
 
     public entry fun create_reward(points: u64, tier: u8, transferable: bool, event_trigger: bool, clock: &Clock, duration: u64, ctx: &mut TxContext) {
         let reward_id = object::new(ctx);
-        let deadline = clock::timestamp_ms(clock) + duration;
-        let expiry = clock::timestamp_ms(clock) + (duration * 2); // Example: Reward expires 2x duration after creation
+        let now = clock::timestamp_ms(clock);
+        let deadline = now + duration;
+        let expiry = now + (duration * 2); // Example: Reward expires 2x duration after creation
         transfer::share_object(Reward {
             id: reward_id,
             customer: tx_context::sender(ctx),
@@ -98,7 +98,7 @@ module LoyaltyRewards::rewards_program {
             escrow: balance::zero(),
             validated: false,
             redeemed: false,
-            created_at: clock::timestamp_ms(clock),
+            created_at: now,
             deadline: deadline,
             expiry: expiry,
             tier: tier,
@@ -177,8 +177,37 @@ module LoyaltyRewards::rewards_program {
         assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
         reward.event_trigger = event_trigger;
     }
+
     public entry fun update_reward_redeemed(reward: &mut Reward, redeemed: bool, ctx: &mut TxContext) {
         assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
         reward.redeemed = redeemed;
-    } 
+    }
+
+    // New functions for querying multiple rewards
+
+    public fun get_all_rewards_for_customer(customer: address, rewards: vector<Reward>): vector<Reward> {
+        rewards.filter(fn(r) { r.customer == customer })
+    }
+
+    public fun get_rewards_by_tier(tier: u8, rewards: vector<Reward>): vector<Reward> {
+        rewards.filter(fn(r) { r.tier == tier })
+    }
+
+    public fun get_expired_rewards(clock: &Clock, rewards: vector<Reward>): vector<Reward> {
+        let now = clock::timestamp_ms(clock);
+        rewards.filter(fn(r) { r.expiry <= now })
+    }
+
+    public fun get_valid_rewards(clock: &Clock, rewards: vector<Reward>): vector<Reward> {
+        let now = clock::timestamp_ms(clock);
+        rewards.filter(fn(r) { r.validated && !r.redeemed && r.deadline > now })
+    }
+
+    // Utility function to transfer a reward to another customer
+
+    public entry fun transfer_reward(reward: &mut Reward, new_customer: address, ctx: &mut TxContext) {
+        assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
+        assert!(reward.transferable, ENotValidated); // Assuming non-transferable rewards cannot be transferred
+        reward.customer = new_customer;
+    }
 }
