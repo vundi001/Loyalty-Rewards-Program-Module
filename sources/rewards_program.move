@@ -4,13 +4,13 @@ module LoyaltyRewards::rewards_program {
     // Imports
     use sui::transfer;
     use sui::sui::SUI;
-    use sui::coin::{Self, Coin};
-    use sui::object::{Self, UID, ID};
-    use sui::balance::{Self, Balance};
-    use sui::tx_context::{Self, TxContext};
-    use sui::clock::{Self, Clock};
+    use sui::coin::{self, Coin};
+    use sui::object::{self, UID, ID};
+    use sui::balance::{self, Balance};
+    use sui::tx_context::{self, TxContext};
+    use sui::clock::{self, Clock};
 
-    // Errors (keeping only used constants)
+    // Errors
     const ENotOwner: u64 = 2;
     const ENotValidated: u64 = 3;
     const EAlreadyRedeemed: u64 = 4;
@@ -29,10 +29,10 @@ module LoyaltyRewards::rewards_program {
         redeemed: bool,
         created_at: u64,
         deadline: u64,
-        expiry: u64, // New field for reward expiry timestamp
-        tier: u8,    // New field for reward tier
-        transferable: bool, // New field for reward transferability
-        event_trigger: bool, // New field for event-based trigger
+        expiry: u64,
+        tier: u8,
+        transferable: bool,
+        event_trigger: bool,
     }
 
     struct RewardCap has key {
@@ -86,7 +86,6 @@ module LoyaltyRewards::rewards_program {
     }
 
     // Public - Entry functions
-
     public entry fun create_reward(points: u64, tier: u8, transferable: bool, event_trigger: bool, clock: &Clock, duration: u64, ctx: &mut TxContext) {
         let reward_id = object::new(ctx);
         let deadline = clock::timestamp_ms(clock) + duration;
@@ -94,16 +93,16 @@ module LoyaltyRewards::rewards_program {
         transfer::share_object(Reward {
             id: reward_id,
             customer: tx_context::sender(ctx),
-            points: points,
+            points,
             escrow: balance::zero(),
             validated: false,
             redeemed: false,
             created_at: clock::timestamp_ms(clock),
-            deadline: deadline,
-            expiry: expiry,
-            tier: tier,
-            transferable: transferable,
-            event_trigger: event_trigger,
+            deadline,
+            expiry,
+            tier,
+            transferable,
+            event_trigger,
         });
     }
 
@@ -126,7 +125,7 @@ module LoyaltyRewards::rewards_program {
 
         let points = reward.points;
         let escrow_amount = balance::value(&reward.escrow);
-        assert!(escrow_amount > 0, EInsufficientBalance); // Ensure there are enough funds in escrow
+        assert!(escrow_amount > 0, EInsufficientBalance);
         let escrow_coin = coin::take(&mut reward.escrow, escrow_amount, ctx);
 
         // Mark the reward as redeemed
@@ -139,7 +138,7 @@ module LoyaltyRewards::rewards_program {
             points_redeemed: points,
         };
 
-        // Change accessibility of the receipt
+        // Transfer the receipt
         transfer::public_transfer(receipt, tx_context::sender(ctx));
 
         // Transfer funds to the customer
@@ -147,7 +146,6 @@ module LoyaltyRewards::rewards_program {
     }
 
     // Additional functions
-
     public entry fun update_reward_points(reward: &mut Reward, new_points: u64, ctx: &mut TxContext) {
         assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
         reward.points = new_points;
@@ -177,8 +175,16 @@ module LoyaltyRewards::rewards_program {
         assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
         reward.event_trigger = event_trigger;
     }
+
     public entry fun update_reward_redeemed(reward: &mut Reward, redeemed: bool, ctx: &mut TxContext) {
         assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
         reward.redeemed = redeemed;
-    } 
+    }
+
+    // New Feature: Transfer reward ownership
+    public entry fun transfer_reward_ownership(reward: &mut Reward, new_owner: address, ctx: &mut TxContext) {
+        assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
+        assert!(reward.transferable, ENotValidated); // Using ENotValidated as a generic error for non-transferable reward
+        reward.customer = new_owner;
+    }
 }
