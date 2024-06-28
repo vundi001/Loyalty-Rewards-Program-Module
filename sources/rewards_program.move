@@ -5,6 +5,7 @@ module LoyaltyRewards::rewards_program {
     use sui::transfer;
     use sui::sui::SUI;
     use sui::coin::{Self, Coin};
+    use std::string::String;
     use sui::object::{Self, UID, ID};
     use sui::balance::{Self, Balance};
     use sui::tx_context::{Self, TxContext};
@@ -16,6 +17,8 @@ module LoyaltyRewards::rewards_program {
     const EAlreadyRedeemed: u64 = 4;
     const EDeadlinePassed: u64 = 6;
     const EInsufficientBalance: u64 = 7;
+    const ERewardNotTransferable: u64 = 8;
+    const EReferralAlreadyUsed: u64 = 9;
 
     // Struct definitions
     struct AdminCap has key { id: UID }
@@ -33,6 +36,7 @@ module LoyaltyRewards::rewards_program {
         tier: u8,    // New field for reward tier
         transferable: bool, // New field for reward transferability
         event_trigger: bool, // New field for event-based trigger
+        referral_used: bool, // New field to track referral usage
     }
 
     struct RewardCap has key {
@@ -43,6 +47,27 @@ module LoyaltyRewards::rewards_program {
         id: UID,
         reward: ID,
         points_redeemed: u64,    
+    }
+
+    struct LeaderboardEntry has key, store {
+        id: UID,
+        customer: address,
+        points: u64,
+    }
+    
+    struct Badge has key, store {
+        id: UID,
+        name: String,
+        description: String,
+        image_url: String,
+    }
+
+    struct Challenge has key, store {
+        id: UID,
+        name: String,
+        description: String,
+        reward_points: u64,
+        completion_condition: bool,
     }
 
     // Module initializer
@@ -104,6 +129,7 @@ module LoyaltyRewards::rewards_program {
             tier: tier,
             transferable: transferable,
             event_trigger: event_trigger,
+            referral_used: false,
         });
     }
 
@@ -146,6 +172,59 @@ module LoyaltyRewards::rewards_program {
         transfer::public_transfer(escrow_coin, reward.customer);
     }
 
+    public entry fun transfer_reward(reward: &mut Reward, new_owner: address, ctx: &mut TxContext) {
+        assert!(reward.transferable, ERewardNotTransferable);
+        assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
+        reward.customer = new_owner;
+    }
+
+    public entry fun use_referral(reward: &mut Reward, points_bonus: u64, ctx: &mut TxContext) {
+        assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
+        assert!(!reward.referral_used, EReferralAlreadyUsed);
+        reward.points = reward.points + points_bonus;
+        reward.referral_used = true;
+    }
+
+    public entry fun split_reward(reward: &mut Reward, split_points: u64, clock: &Clock, ctx: &mut TxContext) {
+        assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
+        assert!(reward.points >= split_points, EInsufficientBalance);
+
+        let new_reward_id = object::new(ctx);
+        let deadline = clock::timestamp_ms(clock) + (reward.deadline - reward.created_at);
+        let expiry = clock::timestamp_ms(clock) + (reward.expiry - reward.created_at);
+        reward.points = reward.points - split_points;
+
+        transfer::share_object(Reward {
+            id: new_reward_id,
+            customer: reward.customer,
+            points: split_points,
+            escrow: balance::zero(),
+            validated: reward.validated,
+            redeemed: false,
+            created_at: clock::timestamp_ms(clock),
+            deadline: deadline,
+            expiry: expiry,
+            tier: reward.tier,
+            transferable: reward.transferable,
+            event_trigger: reward.event_trigger,
+            referral_used: false,
+        });
+    }
+
+    public entry fun update_leaderboard(customer: address, points: u64, ctx: &mut TxContext) {
+        let leaderboard_entry = LeaderboardEntry {
+            id: object::new(ctx),
+            customer: customer,
+            points: points,
+        };
+        transfer::public_transfer(leaderboard_entry, tx_context::sender(ctx));
+    }
+
+    public entry fun trigger_event_based_reward(reward: &mut Reward, event_points: u64, ctx: &mut TxContext) {
+        assert!(reward.event_trigger, ENotValidated);
+        reward.points = reward.points + event_points;
+    }
+
     // Additional functions
 
     public entry fun update_reward_points(reward: &mut Reward, new_points: u64, ctx: &mut TxContext) {
@@ -177,8 +256,59 @@ module LoyaltyRewards::rewards_program {
         assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
         reward.event_trigger = event_trigger;
     }
+
     public entry fun update_reward_redeemed(reward: &mut Reward, redeemed: bool, ctx: &mut TxContext) {
         assert!(reward.customer == tx_context::sender(ctx), ENotOwner);
         reward.redeemed = redeemed;
     } 
+
+    // Gamification functions
+    public entry fun create_badge(name: String, description: String, image_url: String, ctx: &mut TxContext) {
+        let badge_id = object::new(ctx);
+        transfer::share_object(Badge {
+            id: badge_id,
+            name: name,
+            description: description,
+            image_url: image_url,
+        });
+    }
+
+    public entry fun update_badge_name(badge: &mut Badge, new_name: String, ctx: &mut TxContext) {
+        badge.name = new_name;
+    }
+
+    public entry fun update_badge_description(badge: &mut Badge, new_description: String, ctx: &mut TxContext) {
+        badge.description = new_description;
+    }
+
+    public entry fun update_badge_image_url(badge: &mut Badge, new_image_url: String, ctx: &mut TxContext) {
+        badge.image_url = new_image_url;
+    }
+
+    public entry fun create_challenge(name: String, description: String, reward_points: u64, completion_condition: bool, ctx: &mut TxContext) {
+        let challenge_id = object::new(ctx);
+        transfer::share_object(Challenge {
+            id: challenge_id,
+            name: name,
+            description: description,
+            reward_points: reward_points,
+            completion_condition: completion_condition,
+        });
+    }
+
+    public entry fun update_challenge_name(challenge: &mut Challenge, new_name: String, ctx: &mut TxContext) {
+        challenge.name = new_name;
+    }
+
+    public entry fun update_challenge_description(challenge: &mut Challenge, new_description: String, ctx: &mut TxContext) {
+        challenge.description = new_description;
+    }
+
+    public entry fun update_challenge_reward_points(challenge: &mut Challenge, new_reward_points: u64, ctx: &mut TxContext) {
+        challenge.reward_points = new_reward_points;
+    }
+
+    public entry fun update_challenge_completion_condition(challenge: &mut Challenge, new_completion_condition: bool, ctx: &mut TxContext) {
+        challenge.completion_condition = new_completion_condition;
+    }
 }
